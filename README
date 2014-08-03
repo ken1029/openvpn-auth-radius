@@ -1,8 +1,8 @@
 /*
- *  radiusplugin -- An OpenVPN plugin for do radius authentication 
- *					and accounting.
+ *  radiusplugin -- An OpenVPN plugin for do radius authentication.
  * 
  *  Copyright (C) 2005 EWE TEL GmbH/Ralf Luebben <ralfluebben@gmx.de>
+ *  Copyright (c) 2014 Zadane.pl sp. z o.o./Jakub Kramarz <jakub.kramarz@brainly.com>
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -30,6 +30,9 @@ who supported me with the required equipment, hardware
 and helped me with all my questions.
 
 The plugin was developed and tested under Debian Sarge and OpenVPN 2.0 on x86-machines. 
+
+Plugin was modified by Brainly for crowd-radius-server compatibility and successfuly
+deployed under Debian Wheezy and OpenVPN 2.3.
 -----------------------------------------------------------------------------------------------------
 -----------------------------------------------------------------------------------------------------
 
@@ -73,8 +76,10 @@ INSTALL:
 
 OTHER DOCUMENTATION
 -------------------
-An "OpenVPN - RADIUS - MySQL Howto" in german can be found at:
-http://www.roessner-net.com/
+* An "OpenVPN - RADIUS - MySQL Howto" in german can be found at:
+  http://www.roessner-net.com/
+* Atlassian Crowd authentication for OpenVPN: 
+  http://lenwe.net/atlassian-crowd-authentication-for-openvpn
 
 
 FREERADIUS EXAMPLE
@@ -107,13 +112,7 @@ RADIUS PACKETS and OpenVPN events (see http://openvpn.net/man.html SCRIPTING AND
 ---------------------------------------------------------------------------------------------------------
 OpenVPN event                   RADIUS PACKET                                    Information
 -------------                   ------------                                     ------------
-auth-user-pass-verify           ACCESS REQUEST                                  parse of attributes (see below)
-client-connect                  ACCOUNTING REQUEST (Start)			
--                               ACCOUNTING REQUEST (Update)                     If the user had a acct interim interval attribute the update   
-                                                                                is sent periodically with this interval.(Start and stop accounting
-                                                                                packets are sent ever.)
-client-disconnect               ACCOUNTING REQUEST (Stop)		
-
+auth-user-pass-verify           ACCESS REQUEST                                  
 
 RADIUS ATTRIBUTES WHICH PARSED BY THE PLUGIN AND WRITE TO THE CLIENT CONFIG FILE:
 ---------------------------------------------
@@ -125,15 +124,6 @@ RADIUS ATTRIBUTES WHICH PARSED BY THE PLUGIN AND WRITE TO THE CLIENT CONFIG FILE
 OTHER RADIUS ATTRIBUTES
 -----------------------
 - Reply Message 	the text is forwarded to stderr
-
-VENDOR SPECIFIC ATTRIBUTES
----------------------------
-If you want use vendor specific attributes the plugin can call your own program or script at the OpenVPN action
-CLIENT-CONNECT and CLIENT-DISCONNECT.
-If you want to use the feature you have to specify the program and a named pipe for communication
-in the config file.
-The file vsascript.pl shows an example.
-
 
 LIMITS:
 -------
@@ -214,4 +204,4 @@ env1[5]="trusted_ip=127.0.0.1";
 env1[6]="ifconfig_pool_remote_ip=10.8.0.100";
 
 compile for test with a main function:
-g++ -Wall -o main AccountingProcess.cpp Exception.cpp PluginContext.cpp UserAuth.cpp AcctScheduler.cpp IpcSocket.cpp radiusplugin.cpp User.cpp AuthenticationProcess.cpp main.cpp UserAcct.cpp UserPlugin.cpp Config.cpp RadiusClass/RadiusAttribute.cpp RadiusClass/RadiusPacket.cpp RadiusClass/RadiusConfig.cpp RadiusClass/RadiusServer.cpp  RadiusClass/RadiusVendorSpecificAttribute.cpp -lgcrypt
+g++ -Wall -o main Exception.cpp PluginContext.cpp UserAuth.cppIpcSocket.cpp radiusplugin.cpp User.cpp AuthenticationProcess.cpp main.cpp UserAcct.cpp UserPlugin.cpp Config.cpp RadiusClass/RadiusAttribute.cpp RadiusClass/RadiusPacket.cpp RadiusClass/RadiusConfig.cpp RadiusClass/RadiusServer.cpp  RadiusClass/RadiusVendorSpecificAttribute.cpp -lgcrypt

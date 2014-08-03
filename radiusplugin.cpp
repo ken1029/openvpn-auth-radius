@@ -55,8 +55,6 @@ extern "C"
         {
 		pid_t 					pid;		/**<process number*/
 		int 					fd_auth[2];	/**<An array for the socket pair of the authentication process.*/
-		int 					fd_acct[2];	/**<An array for the socket pair of the accounting process.*/
-		AccountingProcess   	Acct;		/**<The accounting background process object.*/
 		AuthenticationProcess 	Auth; 		/**<The authentication background process object.*/
 		PluginContext *context=NULL; 			/**<The context for this functions.*/
 
@@ -73,7 +71,7 @@ extern "C"
 
 
 		// Intercept the --auth-user-pass-verify, --client-connect and --client-disconnect callback.
-		*type_mask = OPENVPN_PLUGIN_MASK ( OPENVPN_PLUGIN_AUTH_USER_PASS_VERIFY ) | OPENVPN_PLUGIN_MASK ( OPENVPN_PLUGIN_CLIENT_CONNECT ) | OPENVPN_PLUGIN_MASK ( OPENVPN_PLUGIN_CLIENT_DISCONNECT );
+		*type_mask = OPENVPN_PLUGIN_MASK ( OPENVPN_PLUGIN_AUTH_USER_PASS_VERIFY );
 
 		// Get verbosity level from the environment.
 		const char *verb_string = get_env ( "verb", envp );
@@ -152,14 +150,6 @@ extern "C"
 			cerr << getTime() << "RADIUS-PLUGIN: socketpair call failed for authentication process\n";
 			goto error;
 		}
-		//Accounting process:
-		if ( socketpair ( PF_UNIX, SOCK_DGRAM, 0, fd_acct ) == -1 )
-		{
-			cerr << getTime() << "RADIUS-PLUGIN: socketpair call failed for accounting process\n";
-			goto error;
-		}
-
-
                 
                 
 		//  Fork off the privileged processes.  It will remain privileged
@@ -228,70 +218,6 @@ extern "C"
 			return 0; // NOTREACHED
 		}
 
-		// 	Fork the accounting process
-		pid = fork ();
-		if ( pid )
-		{
-			// Foreground Process (Parent)
-			int status;	//status if the background process
-
-			//save the pid
-			context->setAcctPid ( pid );
-
-			if ( DEBUG ( context->getVerbosity() ) )
-				cerr << getTime() << "RADIUS-PLUGIN: Start BACKGROUND Process for accounting with PID " << context->getAcctPid() << ".\n";
-
-			// close our copy of child's socket */
-			close ( fd_acct[1] );
-
-			/* don't let future subprocesses inherit child socket */
-			if ( fcntl ( fd_acct[0], F_SETFD, FD_CLOEXEC ) < 0 )
-				cerr << getTime() << "RADIUS-PLUGIN: Set FD_CLOEXEC flag on socket file descriptor failed\n";
-
-			//save the socket number in the context
-			context->acctsocketbackgr.setSocket ( fd_acct[0] );
-
-			// wait for background child process to initialize */
-			status = context->acctsocketbackgr.recvInt();
-
-			if ( status != RESPONSE_INIT_SUCCEEDED )
-			{
-				//set the socket to -1 if the initialization failed
-				context->acctsocketbackgr.setSocket ( -1 );
-			}
-
-			if ( DEBUG ( context->getVerbosity() ) )
-				cerr << getTime() << "RADIUS-PLUGIN: Start AUTH-RADIUS-PLUGIN\n";
-		}
-		else
-		{
-
-			//Background Process
-
-			// close all parent fds except our socket back to parent
-			close_fds_except ( fd_acct[1] );
-
-			// Ignore most signals (the parent will receive them)
-			set_signals ();
-
-			if ( DEBUG ( context->getVerbosity() ) )
-				cerr << getTime() << "RADIUS-PLUGIN: Start BACKGROUND Process for accounting\n";
-
-			// save the socket in the context
-			context->acctsocketforegr.setSocket ( fd_acct[1] );
-
-			//start the backgroung event loop for accounting
-			Acct.Accounting ( context );
-
-			//close the socket
-			close ( fd_acct[1] );
-
-			//free the context of the background process
-			delete context;
-			exit ( 0 );
-			return 0; // NOTREACHED
-		}
-
 		//return the context, this is used between the functions
 		//openvpn_plugin_open_v1
 		//openvpn_plugin_func_v1
@@ -307,18 +233,14 @@ extern "C"
 
 
 	/** This funtion is called from the OpenVpn process everytime
-	 * a event happens. The function handle the events (plugins)
-	 * AUTH_USER_PASS_VERIFY, CLIENT_CONNECT, CLIENT_DISCONNECT.
+	 * a event happens. The function handle the event (plugin)
+	 * AUTH_USER_PASS_VERIFY.
 	 * The function reads the information from the envriomental
 	 * variable and sends the relevant information to the
 	 * background processes.
 	 * AUTH_USER_PASS_VERIFY: The user is authenticated by a radius server,
 	 * if it succeeded the background sends back the framed ip, the routes and the acct_interim_interval
 	 * for the user. Than the user is added to the context.
-	 * CLIENT_CONNECT: The user is added to the accounting by
-	 * sending the information to the background process.
-	 * CLIENT_DISCONNECT: The user is deleted from the
-	 * accounting by sending the information to the backgrund process.
 	 * @param The handle which was allocated in the open function.
 	 * @param The type of plugin, maybe client_conect, client_disconnect, auth_user_pass_verify
 	 * @param A list of arguments which are set in the openvpn configuration file.
@@ -480,267 +402,6 @@ extern "C"
 			return OPENVPN_PLUGIN_FUNC_ERROR;
 			/////////////////////////// CLIENT_CONNECT
 		}
-		if ( type == OPENVPN_PLUGIN_CLIENT_CONNECT && context->acctsocketbackgr.getSocket() >= 0 )
-		{
-
-
-			if ( DEBUG ( context->getVerbosity() ) )
-			{
-				cerr << getTime() << "RADIUS-PLUGIN: FOREGROUND: OPENVPN_PLUGIN_CLIENT_CONNECT is called.\n";
-			}
-
-			try
-			{
-				if ( get_env ( "untrusted_ip", envp ) ==NULL &&  get_env ( "untrusted_ip6", envp ) ==NULL )
-				{
-					throw Exception ( "RADIUS-PLUGIN: FOREGROUND: untrusted_ip and untrusted_ip6 is not defined\n" );
-				}
-				else if ( get_env ( "common_name", envp ) ==NULL )
-				{
-					if ( context->conf.getClientCertNotRequired() == false )
-					{
-						throw Exception ( "RADIUS-PLUGIN: FOREGROUND: common_name is not defined\n" );
-					}
-				}
-				else if ( get_env ( "untrusted_port", envp ) ==NULL )
-				{
-					throw Exception ( "RADIUS-PLUGIN: FOREGROUND: untrusted_port is not defined\n" );
-				}
-				else if ( get_env ( "ifconfig_pool_remote_ip", envp ) ==NULL )
-				{	
-				  cerr << getTime() << "RADIUS-PLUGIN: FOREGROUND: ifconfig_pool_remote_ip is not defined\n" ;
-				}
-				//get username, password and trusted_ip from envp string array
-				//for OpenVPN option client cert not required, common_name is "UNDEF", see status.log
-
-				if ( get_env ( "untrusted_ip", envp ) !=NULL )
-				{
-					untrusted_ip = get_env ( "untrusted_ip", envp );
-				}
-				else
-				{
-					untrusted_ip = get_env ( "untrusted_ip6", envp );
-				}
-
-				if ( get_env ( "common_name", envp ) !=NULL )
-				{
-					common_name=get_env ( "common_name", envp );
-				}
-				else
-				{
-					common_name="UNDEF";
-				}
-				//rewrite the username if OpenVPN use the option username-as-comon-name
-				if ( context->conf.getUsernameAsCommonname() == true )
-				{
-					common_name=get_env ( "username", envp );
-				}
-	
-
-				
-				//find the user in the context, he was added at the OPENVPN_PLUGIN_AUTH_USER_PASS_VERIFY
-				//string key=common_name + string ( "," ) +untrusted_ip+string ( ":" ) + string ( get_env ( "untrusted_port", envp ) );
-                                string key=untrusted_ip+string ( ":" ) + string ( get_env ( "untrusted_port", envp ) );
-                                if ( DEBUG ( context->getVerbosity() ) ){
-                                        cerr << getTime() << "RADIUS-PLUGIN: FOREGROUND: Key: " << key << ".\n";
-				}
-                                newuser=context->findUser(key);
-                                if(newuser == NULL)
-                                {
-                                  
-                                  throw Exception ( "RADIUS-PLUGIN: FOREGROUND: User should be accounted but is unknown, should never happen.\n" );
-                                }
-
-				//set the assigned ip as Framed-IP-Attribute of the user (see RFC2866, chapter 4.1 for more information)
-				if(get_env ( "ifconfig_pool_remote_ip", envp ) !=NULL)
-				{
-				  newuser->setFramedIp ( string ( get_env ( "ifconfig_pool_remote_ip", envp ) ) );
-				}
-				if ( DEBUG ( context->getVerbosity() ) )
-					cerr << getTime() << "RADIUS-PLUGIN: FOREGROUND: Set FramedIP to the IP (" << newuser->getFramedIp() << ") OpenVPN assigned to the user " << newuser->getUsername() << "\n";
-				//the user must be there and must be authenticated but not accounted
-				// isAccounted and isAuthenticated is true it is client connect for renegotiation, the user is already in the accounting process
-				if ( newuser!=NULL && newuser->isAccounted() ==false && newuser->isAuthenticated() )
-				{
-					//transform the integers to strings to send them over the socket
-
-					if ( DEBUG ( context->getVerbosity() ) )
-						cerr << getTime() << "RADIUS-PLUGIN: FOREGROUND: Add user for accounting: username: " << newuser->getUsername() << ", commonname: " << newuser->getCommonname() << "\n";
-
-					//send information to the background process
-					context->acctsocketbackgr.send ( ADD_USER );
-					context->acctsocketbackgr.send ( newuser->getUsername() );
-					context->acctsocketbackgr.send ( newuser->getSessionId() );
-					context->acctsocketbackgr.send ( newuser->getPortnumber() );
-					context->acctsocketbackgr.send ( newuser->getCallingStationId() );
-					context->acctsocketbackgr.send ( newuser->getFramedIp() );
-					context->acctsocketbackgr.send ( newuser->getCommonname() );
-					context->acctsocketbackgr.send ( newuser->getAcctInterimInterval() );
-					context->acctsocketbackgr.send ( newuser->getFramedRoutes() );
-					context->acctsocketbackgr.send ( newuser->getKey() );
-                                        context->acctsocketbackgr.send ( newuser->getStatusFileKey());
-					context->acctsocketbackgr.send ( newuser->getUntrustedPort() );
-					context->acctsocketbackgr.send ( newuser->getVsaBuf(), newuser->getVsaBufLen() );
-					//get the response
-					const int status = context->acctsocketbackgr.recvInt();
-					if ( status == RESPONSE_SUCCEEDED )
-					{
-						newuser->setAccounted ( true );
-
-						if ( DEBUG ( context->getVerbosity() ) )
-							cerr << getTime() << "RADIUS-PLUGIN: FOREGROUND: Accouting succeeded!\n";
-
-						return OPENVPN_PLUGIN_FUNC_SUCCESS;
-					}
-					else
-					{
-						//free the nasport
-						context->delNasPort ( newuser->getPortnumber() );
-						string error;
-						error="RADIUS-PLUGIN: FOREGROUND: Accounting failed for user:";
-						error+=newuser->getUsername();
-						error+="!\n";
-						//delete user from context
-						context->delUser ( newuser->getKey() );
-						throw Exception ( error );
-					}
-				}
-				else
-				{
-
-					string error;
-					error="RADIUS-PLUGIN: FOREGROUND: No user with this commonname or he is already authenticated: ";
-					error+=common_name;
-					error+="!\n";
-					throw Exception ( error );
-
-				}
-			}
-			catch ( Exception &e )
-			{
-				cerr << getTime() << e;
-			}
-			catch ( ... )
-			{
-				cerr << getTime() << "Unknown Exception!";
-
-			}
-			return OPENVPN_PLUGIN_FUNC_ERROR;
-		}
-
-		///////////////////////// OPENVPN_PLUGIN_CLIENT_DISCONNECT
-
-		if ( type == OPENVPN_PLUGIN_CLIENT_DISCONNECT && context->acctsocketbackgr.getSocket() >= 0 )
-		{
-
-
-			if ( DEBUG ( context->getVerbosity() ) )
-			{
-				cerr << getTime() << "\n\nRADIUS-PLUGIN: FOREGROUND: OPENVPN_PLUGIN_CLIENT_DISCONNECT is called.\n";
-			}
-			try
-			{
-				if ( get_env ( "untrusted_ip", envp ) ==NULL && get_env ( "untrusted_ip6", envp ) ==NULL )
-				{
-					throw Exception ( "RADIUS-PLUGIN: FOREGROUND: untrusted_ip and untrusted_ip6 is not defined\n" );
-				}
-				else if ( get_env ( "common_name", envp ) ==NULL )
-				{
-					if ( context->conf.getClientCertNotRequired() == false )
-					{
-						throw Exception ( "RADIUS-PLUGIN: FOREGROUND: common_name is not defined\n" );
-					}
-				}
-				else if ( get_env ( "untrusted_port", envp ) ==NULL )
-				{
-					throw Exception ( "RADIUS-PLUGIN: FOREGROUND: untrusted_port is not defined\n" );
-				}
-
-				if ( get_env ( "untrusted_ip", envp ) !=NULL )
-				{
-					untrusted_ip = get_env ( "untrusted_ip", envp );
-				}
-				else
-				{
-					untrusted_ip = get_env ( "untrusted_ip6", envp );
-				}
-
-
-
-				// get common_name from envp string array, if you don't use certificates it is "UNDEF"
-				// get username, password and trusted_ip from envp string array
-				//for OpenVPN option client cert not required, common_name is "UNDEF", see status.log
-				if ( get_env ( "common_name", envp ) !=NULL )
-				{
-					common_name=get_env ( "common_name", envp );
-				}
-				else
-				{
-					common_name="UNDEF";
-				}
-				//rewrite the username if OpenVPN use the option username-as-comon-name
-				if ( context->conf.getUsernameAsCommonname() == true )
-				{
-					common_name=get_env ( "username", envp );
-				}
-
-				//find the user in the context
-				//newuser=context->findUser ( common_name + string ( "," ) + untrusted_ip + string ( ":" ) + string ( get_env ( "untrusted_port", envp ) ) );
-                                newuser=context->findUser ( untrusted_ip + string ( ":" ) + string ( get_env ( "untrusted_port", envp ) ) );
-
-				if ( newuser!=NULL )
-				{
-
-					if ( DEBUG ( context->getVerbosity() ) )
-						cerr << getTime() <<  "RADIUS-PLUGIN: FOREGROUND: Delete user for accounting: commonname: " << newuser->getKey() << "\n";
-
-
-					//send the information to the background process
-					context->acctsocketbackgr.send ( DEL_USER );
-					context->acctsocketbackgr.send ( newuser->getKey() );
-
-					//get the responce
-					const int status = context->acctsocketbackgr.recvInt();
-					if ( status == RESPONSE_SUCCEEDED )
-					{
-						if ( DEBUG ( context->getVerbosity() ) )
-							cerr << getTime() << "RADIUS-PLUGIN: FOREGROUND: Accouting for user with key" << newuser->getKey()  << " stopped!\n";
-
-						//free the nasport
-						context->delNasPort ( newuser->getPortnumber() );
-
-						//delete user from context
-						context->delUser ( newuser->getKey() );
-						return OPENVPN_PLUGIN_FUNC_SUCCESS;
-					}
-					else
-					{
-						//free the nasport
-						context->delNasPort ( newuser->getPortnumber() );
-
-						//delete user from context
-						context->delUser ( newuser->getKey() );
-						cerr << getTime() << "RADIUS-PLUGIN: FOREGROUND: Error in ACCT Background Process!\n";
-
-					}
-
-				}
-				else
-				{
-					throw Exception ( "No user with this common_name!\n" );
-
-				}
-			}
-			catch ( Exception &e )
-			{
-				cerr << getTime() << "RADIUS-PLUGIN: FOREGROUND:" << e;
-			}
-			catch ( ... )
-			{
-				cerr << getTime() << "RADIUS-PLUGIN: FOREGROUND:" << "Unknown Exception!\n";
-			}
-
-		}
 
 		return OPENVPN_PLUGIN_FUNC_ERROR;
 	}
@@ -781,26 +442,6 @@ extern "C"
 
 		}
 
-		if ( context->acctsocketbackgr.getSocket() >= 0 )
-		{
-			if ( DEBUG ( context->getVerbosity() ) )
-				cerr << getTime() << "RADIUS-PLUGIN: FOREGROUND: close acct background process.\n";
-
-			//tell background process to exit
-			try
-			{
-				context->acctsocketbackgr.send ( COMMAND_EXIT );
-			}
-			catch ( Exception &e )
-			{
-				cerr << getTime() << e;
-			}
-                        
-			// wait for background process to exit
-			if ( context->getAcctPid() > 0 )
-				waitpid ( context->getAcctPid(), NULL, 0 );
-
-		}
 		if (context->getStartThread()==false)
                 {
                   if ( DEBUG ( context->getVerbosity() ) )

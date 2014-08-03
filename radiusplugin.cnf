@@ -39,21 +39,10 @@ overwriteccfiles=true
 # default is false
 # useauthcontrolfile=false
 
-
-# Path to a script for vendor specific attributes.
-# Leave it out if you don't use an own script.
-# vsascript=/root/workspace/radiusplugin_v2.0.5_beta/vsascript.pl
-
-# Path to the pipe for communication with the vsascript.
-# Leave it out if you don't use an own script.
-# vsanamedpipe=/tmp/vsapipe
-
 # A radius server definition, there could be more than one.
 # The priority of the server depends on the order in this file. The first one has the highest priority.
 server
 {
-	# The UDP port for radius accounting.
-	acctport=1813
 	# The UDP port for radius authentication.
 	authport=1812
 	# The name or ip address of the radius server.
@@ -68,8 +57,6 @@ server
 
 server
 {
-	# The UDP port for radius accounting.
-	acctport=1813
 	# The UDP port for radius authentication.
 	authport=1812
 	# The name or ip address of the radius server.

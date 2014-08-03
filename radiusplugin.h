@@ -60,9 +60,7 @@
 #include "UserPlugin.h"
 #include "UserAuth.h"
 #include "UserAcct.h"
-#include "AcctScheduler.h"
 #include "Exception.h"
-#include "AccountingProcess.h"
 #include "AuthenticationProcess.h"
 
 using namespace std;

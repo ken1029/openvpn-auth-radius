@@ -23,11 +23,9 @@ OBJECTS=\
   RadiusClass/RadiusConfig.o \
   RadiusClass/RadiusServer.o \
   RadiusClass/RadiusVendorSpecificAttribute.o \
-  AccountingProcess.o \
   Exception.o \
   PluginContext.o \
   UserAuth.o \
-  AcctScheduler.o \
   IpcSocket.o \
   radiusplugin.o \
   User.o \
